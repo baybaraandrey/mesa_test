@@ -1,0 +1,37 @@
+# Halshow settings
+# This file is generated automatically.
+wm geometry . 1278x619+275+313
+placeFrames 0.393387314439946
+set ::ratio 0.393387314439946
+set ::old_w_leftf 160
+set ::watchlist {
+    pin+hm2_7i97.0.inmux.00.input-00
+    pin+hm2_7i97.0.inmux.00.input-01
+    pin+hm2_7i97.0.inmux.00.input-00-slow
+    pin+hm2_7i97.0.inmux.00.input-01-not
+    pin+hm2_7i97.0.inmux.00.input-00-not
+    pin+joint.0.f-error-lim
+    pin+joint.0.motor-pos-cmd
+    pin+joint.0.motor-pos-fb
+    param+pid.x.do-pid-calcs.tmax
+    param+pid.x.do-pid-calcs.tmax-increased
+    pin+pid.x.do-pid-calcs.time
+    pin+joint.0.error
+    pin+pid.x.error
+    pin+pid.x.output
+    pin+hm2_7i97.0.pwmgen.00.value
+    pin+hm2_7i97.0.pwmgen.00.enable
+    param+hm2_7i97.0.encoder.00.scale
+    pin+hm2_7i97.0.encoder.00.count-latched
+    pin+hm2_7i97.0.encoder.00.rawcounts
+    pin+hm2_7i97.0.encoder.00.count
+    pin+hm2_7i97.0.encoder.00.velocity
+    pin+hm2_7i97.0.encoder.00.position
+}
+set ::workmode watchhal
+set ::watchInterval 100
+set ::col1_width 100
+set ::ffmts 
+set ::ifmts 
+set ::alwaysOnTop 0
+set ::autoSaveWatchlist 1

@@ -1,0 +1,9 @@
+# This file was created with the Mesa Configuration Tool on Jun 13 2026 18:16:04
+# If you make changes to this file DO NOT use the Configuration Tool
+
+# Inputs
+net minus-home-joint-0 joint.0.neg-lim-sw-in
+net minus-home-joint-0 joint.0.home-sw-in <= hm2_7i97.0.inmux.00.input-00-not
+net pos-limit-joint-0 joint.0.pos-lim-sw-in <= hm2_7i97.0.inmux.00.input-01-not
+
+# Outputs
