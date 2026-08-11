@@ -1,0 +1,1148 @@
+INDUSTRIAL CNC PLASMA/OXY-FUEL TABLE RETROFIT
+FULL CONTEXT FOR CODEX — LINUXCNC + MESA 7i97T + ORIGINAL CMC ANALOG SERVO DRIVES
+Current focus: bench-test the Mesa ENA0 drive-enable electronic switch from LinuxCNC
+Date: 2026-08-11
+
+======================================================================
+0. PURPOSE OF THIS FILE
+======================================================================
+
+This file is intended to give Codex enough background to understand what machine is
+being configured, why the LinuxCNC HAL is structured this way, what hardware is being
+reused, what has already been proven, what remains unknown, and what must NOT be
+changed casually.
+
+The immediate implementation task is SMALL:
+
+    Add/verify LinuxCNC control of the Mesa 7i97T ENA0 electronic drive-enable switch
+    so we can bench-test ENA0+ / ENA0- before connecting it to the old CMC servo drive.
+
+This is NOT yet a request to enable the real servo drive, move the motor, redesign the
+safety circuit, retune PID, change encoder scaling, or change analog command scaling.
+
+Before modifying anything, inspect the existing LinuxCNC configuration and use the
+actual HAL/HostMot2 pin names present on this machine. Do not assume generated names
+if the configuration says otherwise.
+
+======================================================================
+1. SOURCE / CONFIDENCE RULES
+======================================================================
+
+The project information comes from several different sources. Keep these distinctions
+clear and do not promote an inference into a fact.
+
+[A] DIRECTLY FROM MESA 7i97T MANUAL
+- 7i97T has six +/-10 V analog servo outputs.
+- 7i97T has six encoder interfaces.
+- Each analog channel has an associated floating drive-enable output.
+- TB3 contains ENA0..ENA5 and AOUT0..AOUT5.
+- ENA outputs are floating optocoupler switches.
+- ENA output rating: 50 mA max, 100 VDC max.
+- ENA outputs are polarized; reverse polarity can damage them.
+- For active-high drive enable:
+      ENA+ -> positive control supply
+      ENA- -> drive enable input
+- For active-low drive enable:
+      ENA+ -> drive enable input
+      ENA- -> control power ground
+- ENA0 through ENA3 are switched in common.
+- ENA4 and ENA5 can be switched independently.
+- Encoder interfaces can be differential or single-ended.
+- Encoder interface provides short-circuit-protected +5 V power.
+- Differential encoder interface has QA,/QA,QB,/QB,IDX,/IDX,+5V,GND.
+- Analog interface recommendation:
+      AOUTn -> drive AIN+
+      adjacent Mesa analog GND -> drive AIN-
+      use shielded twisted pair
+      shield terminated at Mesa end
+      separate drive-common / Mesa power-GND reference if required
+- Analog outputs are +/-10 V, not 0..5 V.
+- Analog output minimum load is 2 kOhm.
+- Analog output max current is approximately 5 mA.
+- 7i97T board itself requires regulated 5 V logic supply, 4.75..5.25 V.
+- The isolated field inputs accept approximately +/-4 V to +/-36 V.
+- Isolated inputs are intended for limit switches / control inputs.
+- Six isolated outputs are floating MOSFET switch outputs, separate from the ENA outputs.
+
+[B] FROM THE ORIGINAL MACHINE / DRIVE PHOTOS
+The servo amplifier is a Cleveland Motion Controls (CMC) analog servo amplifier.
+The faceplate labels were photographed clearly enough to establish the J1/J2 functions
+listed later in this file.
+
+The motor photograph identifies a Torque Systems PM SERVO MOTOR. A model label is
+visible, but do not rely on a guessed exact model string without checking the original
+photo.
+
+An encoder photograph identifies Digital Devices, Inc. hardware. The exact model
+string is not sufficiently reliable from the photo alone, so do not invent specifications
+from a similar encoder.
+
+[C] FROM THE SCANNED BURNY PHANTOM ST TECHNICAL MANUAL / PRIOR MANUAL REVIEW
+The original controller is a Burny Phantom ST / Cleveland Motion Controls system.
+The manual and machine wiring architecture indicate:
+- servo axes with encoder feedback
+- analog servo control architecture
+- X, Y and additional axis capability
+- motor/encoder connectors and machine I/O
+- plasma / oxy-fuel process control integration
+- motor tuning / setup sections in the Burny control
+- differential line-driver encoder wiring used in this machine
+- encoder signals A,/A,B,/B,index,/index,+5V,0V
+- separate servo amplifier velocity feedback through motor tachometer
+- motion-controller position feedback from encoder
+
+Specific encoder connector mapping extracted during the prior manual review:
+    pin 1  = 0 V
+    pin 2  = /Index
+    pin 3  = /B
+    pin 5  = /A
+    pin 6  = Index
+    pin 7  = +5 V
+    pin 8  = B
+    pin 9  = A
+
+Pin 4 is not established in our current notes. Do NOT assign a function to pin 4 by
+guessing.
+
+Terminology:
+    Index = I = Z = encoder once-per-revolution reference channel
+    /Index = /I = /Z
+    Mesa IDX corresponds to encoder Z/index.
+
+[D] PROJECT INFERENCE / DESIGN DECISION
+The retrofit architecture is:
+    LinuxCNC closes the OUTER position loop using the encoder.
+    The old CMC drive remains the power amplifier / inner velocity servo.
+    Motor tachometer stays connected to CMC.
+    Motor encoder is moved to Mesa/LinuxCNC.
+    Mesa sends +/-10 V analog command to CMC.
+    LinuxCNC controls normal servo permission through Mesa ENA.
+    Hardware E-stop / safety relay must ultimately be independent of LinuxCNC.
+
+This architecture is the chosen retrofit design, not a statement that every old wire has
+already been traced and proven.
+
+[E] UNRESOLVED / MUST MEASURE
+- Exact electrical behavior of CMC J1-11 INHIBIT/RESET.
+- Whether J1-11 is active-high, active-low, edge/pulse reset, or a combination.
+- Current drawn by J1-11.
+- Exact electrical type of CMC J1-14 FAULT OUTPUT.
+- Final use of CMC J1-12/J1-13 drive-side limit inputs.
+- Exact production encoder CPR and machine-units-per-revolution relationships for all
+  original axes unless separately measured.
+- Final safety relay topology.
+- Final gantry X/XX joint mapping until physically confirmed.
+
+======================================================================
+2. MACHINE IDENTITY
+======================================================================
+
+This is an older industrial gantry thermal-cutting machine.
+
+It appears to be a plasma / oxy-fuel cutting table, not a modern laser cutter.
+
+Observed system elements:
+- Burny Phantom ST CNC controller
+- Cleveland Motion Controls / CMC servo hardware
+- PM DC servo motors
+- motor tachometer feedback to the servo amplifiers
+- incremental encoder feedback
+- Hypertherm Automation Sensor PHC torch-height controller
+- Hypertherm plasma equipment
+- Kjellberg PA-S45 plasma equipment
+- industrial limit switches, likely Telemecanique XCK-M family
+- axis/interface labels including X, Y, XX, Aux
+- large slatted/water cutting table
+- plasma lifter / plasma control / oxy manifold related interfaces
+
+The machine is heavy industrial equipment. Servo runaway or gantry racking can cause
+serious damage. Plasma power is not part of the current test and must remain disabled.
+
+======================================================================
+3. ORIGINAL BURNY / CMC CONTROL ARCHITECTURE
+======================================================================
+
+The most important conceptual point is that the old machine already used a CLOSED LOOP
+SERVO SYSTEM.
+
+It was not a stepper machine.
+
+Simplified original architecture:
+
+    Burny Phantom ST motion controller
+        |
+        | analog servo command
+        v
+    CMC analog servo amplifier
+        |
+        | high-current DC armature power
+        v
+    PM DC servo motor
+        |
+        +---- tachometer feedback --------> CMC servo amplifier
+        |
+        +---- encoder feedback ------------> Burny motion controller
+
+This is a nested-loop system.
+
+INNER LOOP:
+    CMC servo amplifier + motor tachometer
+    The drive regulates motor velocity/current using local analog feedback.
+
+OUTER LOOP:
+    Burny controller + motor encoder
+    The CNC knows actual axis position and adjusts the analog command.
+
+The LinuxCNC retrofit intentionally keeps this same basic control philosophy:
+
+    LinuxCNC
+        |
+        v
+    Mesa 7i97T
+        |
+        | +/-10 V analog command
+        v
+    existing CMC servo amplifier
+        |
+        v
+    existing PM DC servo motor
+
+    encoder -------------------------------> Mesa 7i97T -> LinuxCNC
+    tachometer -----------------------------> CMC drive only
+
+Do NOT connect the motor tachometer to Mesa as the normal position feedback.
+Do NOT connect motor armature directly to Mesa.
+Mesa is a motion/control interface, not a motor power amplifier.
+
+======================================================================
+4. WHAT THE BURNY MANUAL TELLS US THAT MATTERS FOR THE RETROFIT
+======================================================================
+
+The scanned Burny Phantom ST Technical Manual is a machine/controller manual, not just
+an operator manual. Its table of contents contains installation, maintenance, system setup
+and motor tuning sections. During the prior review, the important retrofit information was:
+
+4.1 Servo motion was a native function of the Burny system
+----------------------------------------------------------
+The controller is designed around industrial servo axes, with encoder feedback and
+separate motor-drive hardware. This aligns with what is visible in the cabinet.
+
+4.2 The machine exposes dedicated motor and encoder interfaces
+--------------------------------------------------------------
+The photographed Burny rear/interface panel includes labels such as:
+    X encoder
+    Y encoder
+    XX encoder
+    X motor
+    Y motor
+    XX motor
+    Aux motor
+    limit switch input
+    plasma lifter
+    plasma control
+    oxy manifold
+    plasma filter
+    COM / communication interfaces
+
+This supports the interpretation that X/Y/XX are real machine motion channels and that
+the machine was built to coordinate motion and thermal-cutting process equipment.
+
+4.3 Encoder type / signals
+--------------------------
+The prior manual review established differential line-driver quadrature feedback:
+
+    A
+    /A
+    B
+    /B
+    Index (I or Z)
+    /Index (/I or /Z)
+    +5 V
+    0 V
+
+The importance of differential signalling:
+- A and /A are complements.
+- B and /B are complements.
+- Z and /Z are complements.
+- A and B are quadrature channels.
+- Z/index is a reference pulse, normally once per encoder revolution.
+- Differential signalling is much more resistant to electrical noise than single-ended
+  encoder signalling, which is important on a plasma machine.
+
+Encoder connector mapping from our earlier Burny/manual investigation:
+
+    Original encoder pin 9  A
+    Original encoder pin 5  /A
+    Original encoder pin 8  B
+    Original encoder pin 3  /B
+    Original encoder pin 6  Index / I / Z
+    Original encoder pin 2  /Index / /I / /Z
+    Original encoder pin 7  +5 V
+    Original encoder pin 1  0 V
+
+Again: pin 4 is not assigned in our current verified notes.
+
+4.4 Encoder feedback and drive tach feedback are separate
+---------------------------------------------------------
+This distinction is critical:
+
+    ENCODER -> CNC controller / now Mesa + LinuxCNC
+    TACH    -> CMC servo drive
+
+The encoder is the machine position feedback.
+The tachometer is the drive's local velocity feedback.
+
+4.5 Motor tuning exists as a controller-level activity
+-------------------------------------------------------
+The Burny manual includes motor setup/tuning procedures, reinforcing that the old CNC
+closed a motion loop around the analog servo system. LinuxCNC will now perform that
+outer control function.
+
+4.6 Process control is integrated but is a later phase
+------------------------------------------------------
+The Burny system also handled plasma / oxy-fuel process functions and lifter controls.
+For the first retrofit phase we are NOT reproducing all of that at once.
+
+Current strategy:
+- first establish reliable motion/control hardware
+- keep plasma disabled
+- later integrate torch start, Arc OK and THC
+- initially retain Hypertherm Sensor PHC if functional
+
+======================================================================
+5. CMC SERVO DRIVE — PHYSICAL CONNECTOR LABELS
+======================================================================
+
+The CMC servo-drive faceplate photo provides the following J1 labels.
+
+J1:
+    J1-1   +10 V, 5 mA OUT
+    J1-2   COMMON
+    J1-3   -10 V, 5 mA OUT
+    J1-4   COMMAND +
+    J1-5   COMMAND -
+    J1-6   TACH IN
+    J1-7   COMMON
+    J1-8   CURR MONITOR OUT
+    J1-9   CURRENT REF
+    J1-10  no confirmed function from our current label transcription
+    J1-11  INHIBIT / RESET
+    J1-12  LIMIT SWITCH +
+    J1-13  LIMIT SWITCH -
+    J1-14  FAULT OUTPUT
+    J1-15  NC
+    J1-16  NC
+
+Do not invent a function for J1-10.
+
+J2 / power area labels visible:
+    MOTOR+
+    MOTOR-
+    -DC BUS IN
+    -DC BUS IN
+    +DC BUS IN
+
+Status / adjustments visible on drive:
+    RUN GREEN
+    GROUND FAULT
+    SURGE
+    RMS / OVER TEMP
+    BUS OVER VOLTAGE
+    compensation / balance / tach / peak current style adjustments
+
+The exact behavior of every diagnostic function is not required for the current ENA test.
+
+======================================================================
+6. WHAT EACH IMPORTANT CMC J1 SIGNAL MEANS FOR THE RETROFIT
+======================================================================
+
+J1-4 COMMAND+ and J1-5 COMMAND-
+--------------------------------
+These are the analog motion command inputs.
+
+Mesa will generate approximately -10 V .. 0 V .. +10 V.
+
+Expected conceptual behavior:
+    positive command -> motion one direction
+    zero command     -> zero velocity demand
+    negative command -> opposite direction
+
+The direction sign may need correction in LinuxCNC configuration after safe testing.
+
+J1-1 +10 V OUT and J1-3 -10 V OUT
+----------------------------------
+These are drive-generated reference outputs, labelled 5 mA.
+
+They are NOT the source for the Mesa analog motion command.
+Mesa generates its own +/-10 V command.
+
+They may later be useful as control references for J1-11 only if the drive input behavior
+and required current are verified. Do not assume this yet.
+
+J1-6 TACH IN and J1-7 COMMON
+----------------------------
+Leave the motor tachometer on the CMC drive.
+
+The tach is part of the drive's inner velocity loop.
+
+J1-8 CURRENT MONITOR OUT
+------------------------
+Diagnostic output. Not needed for basic Mesa motion control.
+
+J1-9 CURRENT REF
+----------------
+Do not repurpose without documentation.
+
+J1-11 INHIBIT/RESET
+-------------------
+This is the important unresolved drive-permission input.
+
+Conceptually it determines whether the drive is permitted to produce motor torque and/or
+is used to reset a latched drive fault.
+
+We do NOT yet know its electrical truth table.
+
+Possible examples ONLY:
+    +10 V -> enabled, 0 V/open -> inhibited
+OR
+    0 V/common -> enabled, open/high -> inhibited
+
+It may also use a transition/pulse for RESET.
+
+DO NOT encode either polarity as a fact until measured on the original wiring.
+
+Required measurement:
+    black meter/scope reference -> J1-2 COMMON
+    measure J1-11 under:
+        drive disabled
+        normal ready/enabled state
+        E-stop
+        reset-button action
+
+Use oscilloscope if reset may be a short pulse.
+
+J1-12 / J1-13 LIMIT SWITCH +/-
+--------------------------------
+These appear to be drive-side limit / inhibit functions.
+
+Do not connect them blindly to Mesa.
+Our first limit-switch implementation uses Mesa isolated inputs for LinuxCNC observation.
+A later safety design may also use the drive-side limit function or safety relay.
+
+J1-14 FAULT OUTPUT
+------------------
+Eventually this should report drive health to LinuxCNC and possibly the hardware safety
+system.
+
+But its electrical type is not yet confirmed:
+- open collector?
+- relay/contact?
+- active-high voltage?
+- active-low?
+- referenced to drive common?
+
+Measure before connecting to Mesa.
+
+======================================================================
+7. MESA 7i97T HARDWARE RELEVANT TO THIS MACHINE
+======================================================================
+
+7.1 Board
+---------
+Mesa 7i97T Ethernet analog servo interface.
+
+Current board IP used in the project:
+    10.10.10.10
+
+7.2 TB3 analog/enable connector
+-------------------------------
+From the Mesa manual:
+
+    TB3-1   ENA0-
+    TB3-2   ENA0+
+    TB3-3   GND0
+    TB3-4   AOUT0
+
+    TB3-5   ENA1-
+    TB3-6   ENA1+
+    TB3-7   GND1
+    TB3-8   AOUT1
+
+    TB3-9   ENA2-
+    TB3-10  ENA2+
+    TB3-11  GND2
+    TB3-12  AOUT2
+
+    TB3-13  ENA3-
+    TB3-14  ENA3+
+    TB3-15  GND3
+    TB3-16  AOUT3
+
+    TB3-17  ENA4-
+    TB3-18  ENA4+
+    TB3-19  GND4
+    TB3-20  AOUT4
+
+    TB3-21  ENA5-
+    TB3-22  ENA5+
+    TB3-23  GND5
+    TB3-24  AOUT5
+
+7.3 Important ENA behavior
+--------------------------
+Mesa documentation:
+- ENA outputs are floating optocoupler switches.
+- maximum 50 mA
+- maximum 100 VDC
+- polarized
+- active-high wiring:
+      ENA+ to positive control supply
+      ENA- to drive enable input
+- active-low wiring:
+      ENA+ to drive enable input
+      ENA- to control-power ground
+- ENA0..ENA3 switch in common
+- ENA4 and ENA5 can be switched independently
+
+This means the ENA pair is conceptually an electronic switch, not a +5 V logic output.
+
+If the CMC J1-11 ultimately requires positive voltage:
+    positive control voltage
+        -> ENA0+
+        -> [Mesa electronic switch]
+        -> ENA0-
+        -> CMC J1-11
+
+If CMC J1-11 ultimately needs to be sunk to common:
+    CMC J1-11
+        -> ENA0+
+        -> [Mesa electronic switch]
+        -> ENA0-
+        -> CMC COMMON
+
+We are NOT choosing one of those physical CMC wiring cases yet.
+Current task only verifies that LinuxCNC can command the Mesa ENA electronic switch.
+
+7.4 Analog command wiring currently planned
+-------------------------------------------
+X drive:
+    Mesa TB3-4 AOUT0 -> CMC X drive J1-4 COMMAND+
+    Mesa TB3-3 GND0  -> CMC X drive J1-5 COMMAND-
+
+Y drive:
+    Mesa TB3-8 AOUT1 -> CMC Y drive J1-4 COMMAND+
+    Mesa TB3-7 GND1  -> CMC Y drive J1-5 COMMAND-
+
+Analog cable:
+    shielded twisted pair
+    AOUT + adjacent GND as pair
+    shield at Mesa end only
+
+A separate drive-common/reference connection may be required between CMC common and
+Mesa power ground as recommended by Mesa for analog servo drive interfaces. Do not
+casually merge shield and signal ground.
+
+7.5 Mesa encoder interface
+--------------------------
+For encoder 0 (X planned):
+    TB1-1  QA0
+    TB1-2  /QA0
+    TB1-3  GND
+    TB1-4  QB0
+    TB1-5  /QB0
+    TB1-6  +5V
+    TB1-7  IDX0
+    TB1-8  /IDX0
+
+For encoder 1 (Y planned):
+    TB1-9   QA1
+    TB1-10  /QA1
+    TB1-11  GND
+    TB1-12  QB1
+    TB1-13  /QB1
+    TB1-14  +5V
+    TB1-15  IDX1
+    TB1-16  /IDX1
+
+Production encoder mapping planned:
+
+X:
+    encoder pin 9 A      -> TB1-1 QA0
+    encoder pin 5 /A     -> TB1-2 /QA0
+    encoder pin 1 0V     -> TB1-3 GND
+    encoder pin 8 B      -> TB1-4 QB0
+    encoder pin 3 /B     -> TB1-5 /QB0
+    encoder pin 7 +5V    -> TB1-6 +5V
+    encoder pin 6 Z/I    -> TB1-7 IDX0
+    encoder pin 2 /Z//I  -> TB1-8 /IDX0
+
+Y:
+    encoder pin 9 A      -> TB1-9 QA1
+    encoder pin 5 /A     -> TB1-10 /QA1
+    encoder pin 1 0V     -> TB1-11 GND
+    encoder pin 8 B      -> TB1-12 QB1
+    encoder pin 3 /B     -> TB1-13 /QB1
+    encoder pin 7 +5V    -> TB1-14 +5V
+    encoder pin 6 Z/I    -> TB1-15 IDX1
+    encoder pin 2 /Z//I  -> TB1-16 /IDX1
+
+Mesa encoder jumpers for these original encoders:
+    differential mode
+
+7.6 Mesa isolated inputs
+------------------------
+Already planned for home/limit testing.
+
+TB4:
+    1  IN0
+    2  IN1
+    3  COMMON 0,1
+    4  IN2
+    5  IN3
+    6  COMMON 2,3
+    7  IN4
+    8  IN5
+    9  COMMON 4,5
+    10 IN6
+    11 IN7
+    12 COMMON 6,7
+
+TB5:
+    1  IN8
+    2  IN9
+    3  COMMON 8,9
+    4  IN10
+    5  IN11
+    6  COMMON 10,11
+    7  IN12
+    8  IN13
+    9  COMMON 12,13
+    10 IN14
+    11 IN15
+    12 COMMON 14,15
+
+The field inputs can operate from approximately 4..36 V and are suitable for 24 V
+industrial switches.
+
+======================================================================
+8. LIMIT / HOME SWITCH APPROACH
+======================================================================
+
+Preferred field wiring is 24 V and normally-closed contacts where practical.
+
+Example:
+    +24 V -> NC limit switch -> Mesa INx
+    0 V   -> corresponding Mesa input COMMON
+
+Reason for NC:
+- normal state proves wiring continuity
+- broken wire can become a fault condition
+- triggered switch becomes a fault condition
+
+Current LinuxCNC work has already involved mapping a physical Mesa input to joint limit /
+home signals.
+
+Example from current work:
+    joint.0.neg-lim-sw-in
+    joint.0.home-sw-in
+    joint.0.pos-lim-sw-in
+
+A current/previous HAL mapping included a Mesa input similar to:
+    hm2_7i97.0.inmux.00.input-00-not
+
+Do not rewrite existing limit logic unless the current task explicitly requires it.
+
+======================================================================
+9. CURRENT LINUXCNC / MESA PROGRESS
+======================================================================
+
+Completed / substantially completed:
+- LinuxCNC installed.
+- MesaCT installed.
+- Mesa 7i97T selected and communicating.
+- Mesa Ethernet communication established.
+- Base LinuxCNC configuration generated.
+- Analog output has been tested on the bench.
+- The important Mesa analog output scaling issue was investigated.
+- Limit/home input testing has been performed.
+- HAL input states have been observed in LinuxCNC.
+- Encoder input testing has been performed with a temporary external encoder.
+- Temporary encoder used for testing:
+      E38S6G5-1000B-G24N
+      nominal 1000 pulses/rev
+      quadrature observation = 4000 counts/rev
+  This temporary encoder is NOT the production machine encoder.
+- Encoder direction and LinuxCNC scale-sign concepts have been discussed.
+- Mesa encoder feedback functionality is therefore known to work in principle.
+
+Known configuration values seen during testing:
+- PID test values around:
+      P = 100
+      I = 0
+      D = 0
+      FF1 = 1
+  Do not alter these as part of the ENA test.
+- Analog scale was investigated separately; do not change it as part of this task.
+
+The current goal is to add/verify the next small hardware feature:
+    Mesa ENA0 electronic switch control from normal LinuxCNC machine enable.
+
+======================================================================
+10. LINUXCNC CONTROL ARCHITECTURE WE WANT
+======================================================================
+
+Final conceptual control flow:
+
+    LinuxCNC machine state / joint amplifier enable
+        |
+        +------> servo PID enable
+        |
+        +------> Mesa analog/PWM channel enable
+                    |
+                    +------> physical ENA0 switch
+                    |
+                    +------> analog output safety behavior
+
+Expected LinuxCNC signal of interest:
+    joint.0.amp-enable-out
+
+Expected HostMot2/Mesa analog channel pin:
+    hm2_7i97.0.pwmgen.00.enable
+
+However:
+DO NOT blindly assume that exact HostMot2 name.
+Inspect the current config and the actual HAL pins first.
+
+Use:
+    halcmd show pin
+    halcmd show pin joint.0.amp-enable-out
+    halcmd show pin hm2_7i97.0.pwmgen.00.enable
+    halcmd show net
+
+Also inspect generated HAL source files.
+
+The implementation should use the normal LinuxCNC machine/amp enable path rather than:
+    setp ...enable TRUE
+
+Never hard-force the servo enable TRUE at startup.
+
+======================================================================
+11. CURRENT IMMEDIATE TASK FOR CODEX
+======================================================================
+
+Implement the smallest possible change required to bench-test ENA0.
+
+Desired logical behavior:
+
+    E-stop active:
+        ENA0 physical electronic switch = OFF / open
+
+    E-stop reset, Machine OFF:
+        ENA0 physical electronic switch = OFF / open
+
+    Machine ON:
+        ENA0 physical electronic switch = ON / conducting
+
+    Machine OFF:
+        ENA0 physical electronic switch = OFF / open
+
+    E-stop pressed while Machine ON:
+        ENA0 physical electronic switch = OFF / open
+
+Expected HAL concept, ONLY IF THESE ARE THE ACTUAL PINS IN THIS CONFIGURATION:
+
+    net x-enable <= joint.0.amp-enable-out
+    net x-enable => pid.x.enable
+    net x-enable => hm2_7i97.0.pwmgen.00.enable
+
+If pid.x.enable is already connected to the existing enable net:
+    reuse that net.
+Do not create duplicate drivers.
+Do not create a second net for a pin already connected.
+Do not redefine existing signals unnecessarily.
+
+The correct implementation may be just one additional destination on an existing net.
+
+Example:
+Existing:
+    net x-enable joint.0.amp-enable-out => pid.x.enable
+
+Possible minimal addition:
+    net x-enable => hm2_7i97.0.pwmgen.00.enable
+
+But inspect the real file first.
+
+======================================================================
+12. VERY IMPORTANT 7i97T ENA0..ENA3 SHARED ENABLE DETAIL
+======================================================================
+
+Mesa documentation says ENA0 through ENA3 are switched in common.
+
+Therefore:
+- Do not assume ENA0 can be independently enabled while ENA1/ENA2/ENA3 remain physically
+  disabled if they are wired to real drives.
+- During the current bench test, no real CMC drive should be connected to these ENA lines.
+- Later commissioning must account for the shared enable behavior.
+- For one-axis commissioning, physically ensure other drives cannot unexpectedly move.
+
+This detail must be preserved in comments/documentation if the HAL change could otherwise
+mislead a future reader.
+
+======================================================================
+13. PHYSICAL BENCH TEST OF ENA0
+======================================================================
+
+Current test is intentionally performed BEFORE connecting CMC J1-11.
+
+Mesa connector:
+    TB3-1 = ENA0-
+    TB3-2 = ENA0+
+
+Goal:
+verify that changing LinuxCNC Machine ON/OFF changes the physical ENA0 switch state.
+
+Because this is a semiconductor/opto switch, a simple DMM continuity test may or may not
+be the best indication depending on meter behavior. A safe low-voltage current-limited
+test circuit is acceptable.
+
+Do NOT apply voltage above Mesa ratings.
+Observe ENA polarity.
+Do NOT connect the CMC drive yet.
+
+A useful validation sequence:
+1. Start LinuxCNC.
+2. Leave E-stop active.
+3. Confirm HostMot2 enable HAL pin false.
+4. Reset E-stop but leave Machine OFF.
+5. Confirm false.
+6. Machine ON.
+7. Confirm joint amp-enable true and HostMot2 enable true.
+8. Observe ENA0 external test circuit switch/conduct.
+9. Machine OFF.
+10. Confirm switch stops conducting.
+11. Re-enable, then press E-stop.
+12. Confirm it immediately returns to disabled state.
+
+======================================================================
+14. CMC J1-11 WILL BE A LATER PHASE
+======================================================================
+
+After ENA0 bench test succeeds, investigate original J1-11 wiring.
+
+Do NOT implement final physical drive-enable wiring based on an assumption.
+
+Measure:
+    J1-11 relative to J1-2 COMMON
+
+Record at least:
+    drive unpowered
+    drive powered but inhibited
+    drive ready/enabled
+    E-stop pressed
+    reset pressed
+
+If enabled state proves to require positive voltage:
+possible later physical wiring:
+    suitable positive control source -> ENA0+ -> ENA0- -> J1-11
+
+If enabled state proves to require sinking to common:
+possible later physical wiring:
+    J1-11 -> ENA0+ -> ENA0- -> J1-2 COMMON
+
+These are examples, not current implementation instructions.
+
+Also confirm J1-11 input current is below the relevant source and Mesa ENA limits.
+
+======================================================================
+15. DRIVE FAULT — FUTURE IMPLEMENTATION
+======================================================================
+
+CMC J1-14 = FAULT OUTPUT.
+
+Future goal:
+    CMC fault -> Mesa isolated input -> LinuxCNC machine fault logic
+and possibly:
+    drive fault -> hardware safety circuit
+
+Before wiring, determine electrical output type by measurement/documentation.
+
+Do NOT attach J1-14 directly to a Mesa input until voltage/polarity/source type is known.
+
+======================================================================
+16. ENCODER TEST / PRODUCTION ENCODER NOTES
+======================================================================
+
+For the production encoders, all eight encoder conductors are expected to be used:
+
+    A
+    /A
+    B
+    /B
+    Z/index
+    /Z/index
+    +5 V
+    GND
+
+Mesa supplies +5 V and GND at each encoder terminal group.
+
+A logic analyzer can be used to identify unknown signal wires:
+- logic-analyzer GND -> encoder 0 V
+- observe six signal wires simultaneously
+- complementary pairs identify A//A, B//B, Z//Z
+- index pair occurs once per revolution
+- A/B are quadrature
+
+A logic analyzer can identify complementary pairs but may not by itself determine the
+desired machine convention for "A versus /A" or which pair should be called A versus B.
+Direction is ultimately verified using Mesa/LinuxCNC counts.
+
+Do not treat cable shield as encoder 0 V.
+
+======================================================================
+17. ANALOG OUTPUT NOTES ALREADY LEARNED
+======================================================================
+
+The Mesa AOUT output is +/-10 V analog servo command.
+
+The "5 mA" figure is current capability, not a 5 V output range.
+
+Do not confuse:
+    Mesa board +5 V logic supply
+with:
+    Mesa +/-10 V analog servo output
+or:
+    CMC J1-1 +10 V / J1-3 -10 V reference outputs.
+
+The analog command should ultimately be tested with drive disabled first:
+- command small values
+- measure J1-4 relative to J1-5
+- verify zero command
+- verify positive and negative command
+- only then consider enabling a drive.
+
+======================================================================
+18. SERVO SAFETY / RUNAWAY RISK
+======================================================================
+
+Wrong command polarity or wrong encoder polarity can cause immediate positive feedback
+and servo runaway.
+
+Therefore final motion commissioning sequence:
+1. Plasma disabled.
+2. One axis at a time.
+3. Other drives physically prevented from unexpected activation.
+4. Encoder verified before closing position loop.
+5. Very low speed.
+6. Very low acceleration.
+7. Conservative following-error limits.
+8. Low/known PID gains.
+9. E-stop immediately accessible.
+10. Hardware safety path independent of LinuxCNC.
+
+For a correctly signed closed loop:
+    positive commanded motion must produce feedback of the corresponding sign expected
+    by LinuxCNC.
+
+If encoder direction is wrong, correct configuration/wiring deliberately.
+Do not randomly reverse both command and feedback signs.
+
+======================================================================
+19. GANTRY / XX AXIS
+======================================================================
+
+The original machine has labels X, Y, XX and Aux.
+
+XX is believed to be the second motor on a dual-drive gantry, but this must be physically
+confirmed.
+
+If X/XX are a gantry pair:
+- LinuxCNC should use separate joints for the two motors.
+- each side should have its own home/reference switch if possible.
+- homing should square the gantry.
+- incorrect independent movement can rack/twist the gantry.
+
+Do not expand the current ENA test into gantry configuration work.
+
+======================================================================
+20. PLASMA / THC CONTEXT
+======================================================================
+
+The machine includes Hypertherm Sensor PHC and plasma equipment.
+This strongly influences noise/safety design but is not part of the current ENA task.
+
+Phase-1 intended process architecture:
+    LinuxCNC controls XY
+    LinuxCNC commands torch start
+    Hypertherm PHC continues controlling torch height if usable
+    Arc OK / ready is fed back to LinuxCNC
+
+Possible future architecture:
+    QtPlasmaC / PlasmaC with more direct LinuxCNC THC integration
+
+No plasma firing during servo commissioning.
+
+======================================================================
+21. SAFETY ARCHITECTURE — FINAL TARGET
+======================================================================
+
+LinuxCNC normal machine-enable is NOT the only safety mechanism.
+
+Target:
+    E-stop / safety devices
+        -> hardware safety relay
+            -> remove servo permission / contactor
+            -> independent of PC/LinuxCNC
+        -> LinuxCNC receives status
+
+LinuxCNC:
+    handles normal machine enable/disable
+    sees faults
+    sees limit/home status
+    commands normal servo enable
+
+Hardware:
+    must be capable of removing drive torque independently of software
+
+The present ENA0 HAL test is functional testing, not final safety validation.
+
+======================================================================
+22. CURRENT CODING CONSTRAINTS
+======================================================================
+
+For the ENA test:
+
+DO:
+- inspect existing INI/HAL files first
+- identify actual Mesa component name
+- identify actual pwmgen/analog enable pin
+- identify existing x/joint enable net
+- minimally attach the Mesa enable pin to the correct existing enable signal
+- preserve comments and generated structure where practical
+- show exact diff
+- show exact verification commands
+- explain whether the 7i97T channel enable controls the physical ENA switch in this
+  firmware/configuration
+- if uncertain, use mesaflash --readhmid / halcmd pin inspection rather than guessing
+
+DO NOT:
+- change PID gains
+- change encoder scale
+- change axis SCALE
+- change MAX_VELOCITY
+- change MAX_ACCELERATION
+- change analog output scaling
+- change PWM frequency unless specifically required and justified
+- change limits/home logic
+- change E-stop logic except what is strictly needed to route existing machine enable
+- force enable TRUE
+- bypass safety
+- configure CMC J1-11 yet
+- configure drive fault input yet
+- configure plasma
+- rewrite the entire MesaCT config
+- regenerate the whole configuration unless unavoidable
+
+======================================================================
+23. WHAT CODEX SHOULD REPORT AFTER IMPLEMENTATION
+======================================================================
+
+Return:
+
+1. Configuration directory used.
+2. File(s) inspected.
+3. Exact file modified.
+4. Exact HAL lines before/after.
+5. Existing net reused, if any.
+6. Actual discovered HostMot2 enable pin name.
+7. Why that pin corresponds to the 7i97T analog/drive-enable channel.
+8. Any 7i97T shared ENA0..ENA3 implication.
+9. Commands to verify:
+       halcmd show pin ...
+       halcmd show net ...
+10. Expected values for:
+       E-stop active
+       E-stop reset + Machine OFF
+       Machine ON
+       Machine OFF
+11. How to revert the change.
+12. Any ambiguity that prevents safe implementation.
+
+If the actual pin names do not match the expected examples, stop relying on the examples
+and use the real pin names.
+
+======================================================================
+24. REFERENCE WIRING SUMMARY
+======================================================================
+
+X ANALOG COMMAND:
+    Mesa TB3-4 AOUT0 -> CMC X J1-4 COMMAND+
+    Mesa TB3-3 GND0  -> CMC X J1-5 COMMAND-
+
+Y ANALOG COMMAND:
+    Mesa TB3-8 AOUT1 -> CMC Y J1-4 COMMAND+
+    Mesa TB3-7 GND1  -> CMC Y J1-5 COMMAND-
+
+X ENCODER:
+    pin 9 A    -> TB1-1 QA0
+    pin 5 /A   -> TB1-2 /QA0
+    pin 1 0V   -> TB1-3 GND
+    pin 8 B    -> TB1-4 QB0
+    pin 3 /B   -> TB1-5 /QB0
+    pin 7 +5V  -> TB1-6 +5V
+    pin 6 Z/I  -> TB1-7 IDX0
+    pin 2 /Z   -> TB1-8 /IDX0
+
+Y ENCODER:
+    pin 9 A    -> TB1-9 QA1
+    pin 5 /A   -> TB1-10 /QA1
+    pin 1 0V   -> TB1-11 GND
+    pin 8 B    -> TB1-12 QB1
+    pin 3 /B   -> TB1-13 /QB1
+    pin 7 +5V  -> TB1-14 +5V
+    pin 6 Z/I  -> TB1-15 IDX1
+    pin 2 /Z   -> TB1-16 /IDX1
+
+TACH:
+    motor tach signal -> CMC J1-6 TACH IN
+    motor tach common -> CMC J1-7 COMMON
+
+MOTOR ARMATURE:
+    motor + -> CMC J2 MOTOR+
+    motor - -> CMC J2 MOTOR-
+
+DRIVE ENABLE:
+    CMC J1-11 INHIBIT/RESET
+    NOT CONNECTED TO MESA YET
+    electrical polarity/behavior must be measured
+
+DRIVE FAULT:
+    CMC J1-14 FAULT OUTPUT
+    NOT CONNECTED TO MESA YET
+    electrical type must be measured
+
+MESA ENA0 TEST:
+    TB3-1 ENA0-
+    TB3-2 ENA0+
+    bench test only
+
+======================================================================
+25. FINAL IMMEDIATE INSTRUCTION TO CODEX
+======================================================================
+
+Treat this as an incremental commissioning task on an industrial machine.
+
+First inspect the current LinuxCNC configuration.
+
+Then implement only the minimum HAL change required so that normal LinuxCNC
+Machine ON / amplifier-enable state controls the Mesa 7i97T channel-0 enable and
+therefore the physical ENA0 electronic switch.
+
+The CMC servo amplifier must remain disconnected from ENA0 during this test.
+
+The desired result is simply:
+    Machine OFF / E-stop -> ENA0 off
+    Machine ON           -> ENA0 on
+
+Do not move the motor and do not expand scope.
+
+END OF CONTEXT
