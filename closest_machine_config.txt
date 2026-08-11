@@ -1,0 +1,173 @@
+Drive scale          = 10
+Analog Scale Max     = 10
+Analog Min Limit     = -10
+Analog Max Limit     = +10
+
+Encoder Scale        = -634.92
+
+PWM frequency        = 75000 Hz
+PWM dither           = enabled
+
+encoder = 500 PPR differential
+quadrature = 2000 counts/revolution
+
+axis travel = 0.7875 inch/revolution
+            = 20.0025 mm/revolution
+
+2000 / 20.0025
+≈ 99.99 counts/mm
+
+
+
+
+initial
+P     = 10 ... 50 initially
+I     = 0
+D     = 0
+FF0   = 0
+FF1   = 1 initially
+FF2   = 0
+
+
+SCALE = 10
+ANALOG_SCALE_MAX = 10
+ANALOG_MIN_LIMIT = -10
+ANALOG_MAX_LIMIT = 10
+
+ENCODER_SCALE = <calculated for that machine>
+
+P = <tuned>
+I = 0 initially
+D = 0 initially
+FF0 = 0
+FF1 = <tuned>
+FF2 = <tuned later>
+
+
+
+pwm_frequency = 75000
+dither = true
+offset-mode = 1
+
+
+////////////////////////////////////
+Complete real 7i97T retrofit: Maho MH500
+
+X!!!!!!!!!!!!!!!
+
+Travel:
+MIN_LIMIT          = 0
+MAX_LIMIT          = 490
+
+Motion:
+MAX_VELOCITY       = 66 mm/s
+MAX_ACCELERATION   = 75 mm/s²
+
+Servo:
+SCALE              = -1
+ANALOG_SCALE_MAX   = 10
+ANALOG_MIN_LIMIT   = -10
+ANALOG_MAX_LIMIT   = +10
+
+ENCODER_SCALE      = -2000
+
+FERROR             = 3 mm
+MIN_FERROR         = 1 mm
+
+DEADBAND           = 0.00025
+
+P                  = 0.45
+I                  = 0
+D                  = 0
+
+FF0                = 0
+FF1                = 0.0134
+FF2                = 0.0001
+
+BIAS               = 0
+MAX_OUTPUT         = 10
+MAX_ERROR          = 25
+
+Homing:
+HOME_SEARCH_VEL    = -8
+HOME_LATCH_VEL     = -1
+HOME_FINAL_VEL     = 3
+HOME_SEQUENCE      = 0
+HOME_USE_INDEX     = True
+
+
+
+
+Y !!!!!!!!!!!!!!
+Travel:
+0 ... 335 mm
+
+MAX_VELOCITY       = 66
+MAX_ACCELERATION   = 75
+
+SCALE              = +1
+
+ANALOG_SCALE_MAX   = 10
+ANALOG_MIN_LIMIT   = -10
+ANALOG_MAX_LIMIT   = +10
+
+ENCODER_SCALE      = +2000
+
+FERROR             = 3
+MIN_FERROR         = 1
+DEADBAND           = 0.00025
+
+P                  = 0.45
+I                  = 0
+D                  = 0
+FF0                = 0
+FF1                = 0.0134
+FF2                = 0.0001
+
+BIAS               = 0
+MAX_OUTPUT         = 10
+MAX_ERROR          = 25
+
+HOME_SEARCH_VEL    = -8
+HOME_LATCH_VEL     = -1
+HOME_FINAL_VEL     = 3
+HOME_SEQUENCE      = 1
+HOME_USE_INDEX     = True
+
+
+
+z!!!!!!!!!!!!!!!!
+Travel:
+-320 ... 0 mm
+
+MAX_VELOCITY       = 33
+MAX_ACCELERATION   = 75
+
+SCALE              = 0.5
+
+ANALOG_SCALE_MAX   = 10
+ANALOG_MIN_LIMIT   = -10
+ANALOG_MAX_LIMIT   = +10
+
+ENCODER_SCALE      = +2000
+
+FERROR             = 3
+MIN_FERROR         = 1
+DEADBAND           = 0.00025
+
+P                  = 0.45
+I                  = 0
+D                  = 0
+FF0                = 0
+FF1                = 0.0134
+FF2                = 0.0001
+
+BIAS               = 0
+MAX_OUTPUT         = 10
+MAX_ERROR          = 25
+
+HOME_SEARCH_VEL    = +6
+HOME_LATCH_VEL     = +1
+HOME_FINAL_VEL     = 3
+HOME_SEQUENCE      = 2
+HOME_USE_INDEX     = True
