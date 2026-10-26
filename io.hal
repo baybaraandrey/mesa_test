@@ -6,4 +6,8 @@ net minus-home-joint-0 joint.0.neg-lim-sw-in
 net minus-home-joint-0 joint.0.home-sw-in <= hm2_7i97.0.inmux.00.input-00-not
 net pos-limit-joint-0 joint.0.pos-lim-sw-in <= hm2_7i97.0.inmux.00.input-01-not
 
+net minus-home-joint-1 joint.1.neg-lim-sw-in
+net minus-home-joint-1 joint.1.home-sw-in <= hm2_7i97.0.inmux.00.input-02-not
+net pos-limit-joint-1 joint.1.pos-lim-sw-in <= hm2_7i97.0.inmux.00.input-03-not
+
 # Outputs
